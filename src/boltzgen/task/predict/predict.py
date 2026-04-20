@@ -3,6 +3,7 @@ from boltzgen.utils.quiet import quiet_startup
 quiet_startup()
 
 import os
+import time as _time
 
 # Disable Triton auto-tuning during inference
 os.environ.setdefault("CUEQ_DEFAULT_CONFIG", "1")
@@ -133,6 +134,7 @@ class Predict(Task):
             self.trainer["num_nodes"] = int(os.environ.get("SLURM_NNODES", 1))
 
         # Load model
+        _t0 = _time.time()
         self.model_module: LightningModule = Boltz.load_from_checkpoint(
             self.checkpoint,
             strict=True,
@@ -144,6 +146,8 @@ class Predict(Task):
             **self.override,
         )
         self.model_module.eval()
+        _weight_load_s = _time.time() - _t0
+        print(f"[TIMING] weight_load={_weight_load_s:.1f}s")
 
         if self.compile_pairformer:
             self.model_module.is_pairformer_compiled = True
@@ -187,8 +191,23 @@ class Predict(Task):
             **self.trainer,
         )
         if run_prediction:
-            # Run training
+            _t1 = _time.time()
             self.lightning_trainer.predict(
                 self.model_module, datamodule=self.data, return_predictions=False
             )
+            _inference_s = _time.time() - _t1
+            _n = len(self.data.predict_set)
+            _num_designs = int(os.environ.get("BOLTZGEN_NUM_DESIGNS", _n))
+            print(f"[TIMING] inference={_inference_s:.1f}s  n={_n}  per_design={_inference_s/_num_designs:.1f}s")
+            timing_file = os.environ.get("BOLTZGEN_TIMING_FILE")
+            if timing_file:
+                import json as _json
+                os.makedirs(os.path.dirname(timing_file), exist_ok=True)
+                with open(timing_file, "w") as _f:
+                    _json.dump({
+                        "weight_load": round(_weight_load_s, 1),
+                        "inference": round(_inference_s, 1),
+                        "num_designs": _num_designs,
+                        "per_design": round(_inference_s / _num_designs, 1),
+                    }, _f)
             del self.model_module
