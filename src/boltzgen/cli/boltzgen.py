@@ -729,6 +729,29 @@ def check_command(args: argparse.Namespace) -> None:
     check_design_specs(args, moldir, mols)
 
 
+def _write_timing_summary(output_dir: Path, timings_dir: Path, wall_times: dict, num_designs: int) -> None:
+    import json as _json
+    lines = ["Run timing summary", "=" * 60]
+    total_wall = sum(wall_times.values())
+    for step, wall in wall_times.items():
+        tf = timings_dir / f"{step}.json"
+        if tf.exists():
+            t = _json.loads(tf.read_text())
+            lines.append(
+                f"{step:<20} weight_load={t['weight_load']:.1f}s  "
+                f"inference={t['inference']:.1f}s  "
+                f"per_design={t['per_design']:.1f}s  (wall={wall:.1f}s)"
+            )
+        else:
+            lines.append(f"{step:<20} wall={wall:.1f}s  per_design={wall/num_designs:.1f}s")
+    lines += ["-" * 60, f"{'total':<20} wall={total_wall:.1f}s  per_design={total_wall/num_designs:.1f}s"]
+    summary = "\n".join(lines) + "\n"
+    summary_path = output_dir / "timing_summary.txt"
+    summary_path.write_text(summary)
+    print(f"\nTiming summary written to {summary_path}")
+    print(summary)
+
+
 def execute_command(args: argparse.Namespace) -> None:
     """
     Execute a **pre-configured binder design pipeline** from a directory of YAML files.
@@ -799,12 +822,18 @@ def execute_command(args: argparse.Namespace) -> None:
         return
 
     total_steps = len(resolved_steps)
+    timings_dir = args.output / "timings"
+    timings_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["BOLTZGEN_NUM_DESIGNS"] = str(args.num_designs)
+    step_wall_times: dict = {}
+
     for index, (step_name, config_path) in enumerate(resolved_steps, start=1):
         print("**************************************************")
         print(f"Pipeline step {index} of {total_steps}: {step_name}")
 
         os.environ["BOLTZGEN_PIPELINE_PROGRESS"] = f"Step {index}/{total_steps}"
         os.environ["BOLTZGEN_PIPELINE_STEP"] = step_name
+        os.environ["BOLTZGEN_TIMING_FILE"] = str(timings_dir / f"{step_name}.json")
 
         start = time.time()
         if args.subprocess:
@@ -823,12 +852,13 @@ def execute_command(args: argparse.Namespace) -> None:
             task.run(config)
 
         elapsed = time.time() - start
+        step_wall_times[step_name] = elapsed
         print(f"✓ Step {step_name} completed successfully in {elapsed:.1f}s")
 
-    if "BOLTZGEN_PIPELINE_PROGRESS" in os.environ:
-        del os.environ["BOLTZGEN_PIPELINE_PROGRESS"]
-    if "BOLTZGEN_PIPELINE_STEP" in os.environ:
-        del os.environ["BOLTZGEN_PIPELINE_STEP"]
+    for key in ("BOLTZGEN_PIPELINE_PROGRESS", "BOLTZGEN_PIPELINE_STEP", "BOLTZGEN_TIMING_FILE", "BOLTZGEN_NUM_DESIGNS"):
+        os.environ.pop(key, None)
+
+    _write_timing_summary(args.output, timings_dir, step_wall_times, args.num_designs)
 
 
 #### Pipeline implementation ####
