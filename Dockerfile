@@ -44,6 +44,11 @@ COPY . /app
 
 RUN pip install --no-cache-dir -e /app
 
+RUN pip install --force-reinstall --no-deps torch==2.6.0+cu124 --index-url https://download.pytorch.org/whl/cu124 && \
+    pip install "nvidia-cusparselt-cu12==0.6.2" && \
+    find /usr/local/lib/python3.11/dist-packages/nvidia -maxdepth 2 -name "lib" -type d \
+        | tee /etc/ld.so.conf.d/nvidia-pypi.conf && ldconfig
+
 ARG DOWNLOAD_WEIGHTS=false
 RUN mkdir -p "${HF_HOME}" && \
     if [ "${DOWNLOAD_WEIGHTS}" = "true" ]; then \
