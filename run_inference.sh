@@ -1,4 +1,5 @@
 #!/bin/bash
+# Usage: bash run_inference.sh
 docker run --rm --gpus all --shm-size=8g \
     -v "$(realpath workdir)":/workdir \
     -v "$(realpath cache)":/cache \
